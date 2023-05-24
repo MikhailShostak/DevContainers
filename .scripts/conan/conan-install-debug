@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -e
+
+root=$(dirname -- $0)
+conan install $root --output-folder=/opt/build-debug --settings=build_type=Debug --build=missing $@

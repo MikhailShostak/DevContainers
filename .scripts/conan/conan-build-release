@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -e
+
+root=$(dirname -- $0)
+conan build $root --output-folder=/opt/build-release --build=missing $@
