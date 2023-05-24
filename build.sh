@@ -14,3 +14,4 @@ docker build . -f .images/gui.dockerfile -t mikhail.shostak/gui
 docker build . -f .images/aws-conan.dockerfile -t mikhail.shostak/conan
 
 docker image prune -f
+docker builder prune -f
