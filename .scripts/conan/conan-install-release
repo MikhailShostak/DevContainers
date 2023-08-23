@@ -3,4 +3,4 @@
 set -e
 
 root=$(dirname -- $0)
-conan install $root --output-folder=/opt/build-release --build=missing $@
+conan install $root --output-folder=/work --build=missing $@

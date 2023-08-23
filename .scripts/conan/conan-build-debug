@@ -3,4 +3,4 @@
 set -e
 
 root=$(dirname -- $0)
-conan build $root --output-folder=/opt/build-debug --settings=build_type=Debug --build=missing $@
+conan build $root --output-folder=/work --settings=build_type=Debug --build=missing $@
