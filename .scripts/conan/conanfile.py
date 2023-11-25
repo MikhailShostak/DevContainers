@@ -1,36 +1,42 @@
 from conan import ConanFile, tools
 from conan.tools.cmake import CMake
 
-import os, yaml, glob, hashlib
+import os, yaml, glob, hashlib, argparse
+from pathlib import PureWindowsPath
 
-class ProjectGenerator(ConanFile):
+class TargetGenerator(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     generators = "CMakeToolchain", "CMakeDeps"
 
-    project_base_dir = 'project'
+    project_base_dir = '.'
     project_path = None
-    project_name = None
-    _project = None
+    target_name = None
+    _target = None
 
     @property
-    def project(self):
-        if self._project:
-            return self._project
+    def target(self):
+        if self._target:
+            return self._target
 
         project_files = glob.glob(f'{self.project_base_dir}/*.project')
-
         self.project_path = os.path.join(os.getcwd(), project_files[0])
-        self.project_name = os.path.splitext(os.path.basename(self.project_path))[0]
 
-        print(f'Loading {self.project_path}')
+        print(f'Loading {self.target_name} target from {self.project_path}')
 
+        project = None
         with open(self.project_path, 'r') as f:
-            self._project = yaml.load(f, Loader=yaml.FullLoader)
+            project = yaml.load(f, Loader=yaml.FullLoader)
 
-        return self._project
+        for target in project['Targets']:
+            if target['Name'] == self.target_name:
+                self._target = target
+                return self._target
+
+        raise RuntimeError(f'Target \"{self.target_name}\" not found.')
 
     def get_source_paths(self, project_base_dir):
-        return glob.glob(f'{self.project_base_dir}/{project_base_dir}/**/*.cpp', recursive=True)
+        paths = glob.glob(f'{self.project_base_dir}/{project_base_dir}/**/*.cpp', recursive=True)
+        return [PureWindowsPath((os.path.normpath(path))).as_posix() for path in paths]
 
     def get_all_subfolder_paths(self, project_base_dir):
         return [name for name in glob.glob(f'{self.project_base_dir}/{project_base_dir}/**/*/', recursive=True) if os.path.isdir(name)]
@@ -44,8 +50,18 @@ class ProjectGenerator(ConanFile):
             tools.files.save(self, path, content)
 
     def requirements(self):
-        for dependency in self.project['Dependencies']:
-            self.requires(dependency)
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--output-folder', type=str, help='Specify output folder path')
+        args, _ = parser.parse_known_args()
+
+        self.target_name = os.path.basename(args.output_folder)
+
+        self.project_base_dir = os.path.normpath(os.path.abspath(os.path.join(os.getcwd(), self.project_base_dir)))
+
+        for dependency in self.target['Dependencies']:
+            package = dependency.split(' as ')[0].strip()
+            print(package)
+            self.requires(package)
 
     def generate(self):
         cmake_project_path = os.path.join(str(self.folders.build_folder), 'CMakeLists.txt')
@@ -54,16 +70,28 @@ class ProjectGenerator(ConanFile):
         cmake_find_packages = []
         cmake_link_packages = []
 
-        for dependency in self.project['Dependencies']:
-            package = dependency.split('/')[0]
-            cmake_find_packages.append(f'find_package({package} REQUIRED)')
-            cmake_link_packages.append(f'{package}::{package}')
+        target_files = glob.glob(f'{os.getcwd()}/*Targets.cmake')
 
-        version = self.project['Version']
+        for path in target_files:
+            package = os.path.basename(path).split('Targets.cmake')[0]
+            if package.startswith('module-'):
+                continue
+            cmake_find_packages.append(f'find_package({package} REQUIRED)')
+
+        import re
+        for path in target_files:
+            with open(path) as f:
+                for line in f:
+                    match = re.search(r"Conan: Target declared '([^']+)'", line)
+                    if match:
+                        cmake_target = match.group(1)
+                        cmake_link_packages.append(cmake_target)
+
+        version = self.target['Version']
 
         cmake_content = [
             'cmake_minimum_required(VERSION 3.5)',
-            f'project({self.project_name} VERSION {version})',
+            f'project({self.target_name} VERSION {version})',
             'set(CMAKE_CXX_STANDARD 17)',
             'set(CMAKE_CXX_STANDARD_REQUIRED True)',
         ]
@@ -71,23 +99,23 @@ class ProjectGenerator(ConanFile):
         if cmake_find_packages:
             cmake_content.extend(cmake_find_packages)
 
-        source_base_dir = 'Source'
-        include_base_dir = 'Include'
+        source_base_dir = f'{self.target_name}/Source'
+        include_base_dir = f'{self.target_name}/Include'
 
         source_cpp_paths = self.get_source_paths(source_base_dir)
         include_subfolders = self.get_all_subfolder_paths(include_base_dir)
         source_subfolders = self.get_all_subfolder_paths(source_base_dir)
 
-        print(source_cpp_paths)
-        print(include_subfolders)
-        print(source_subfolders)
+        print(f'Source Paths: {source_cpp_paths}')
+        print(f'Include Subfolders: {include_subfolders}')
+        print(f'Source Subfolders: {source_subfolders}')
 
         cmake_sources = ' '.join(source_cpp_paths)
 
-        cmake_content.append(f'add_executable({self.project_name} {cmake_sources})')
+        cmake_content.append(f'add_executable({self.target_name} {cmake_sources})')
         if cmake_link_packages:
             packages = ' '.join(cmake_link_packages)
-            cmake_content.append(f'target_link_libraries({self.project_name} {packages})')
+            cmake_content.append(f'target_link_libraries({self.target_name} {packages})')
 
         cmake_content = '\n'.join(cmake_content)
 
